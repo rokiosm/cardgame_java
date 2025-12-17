@@ -22,6 +22,9 @@ public class Lobby extends JFrame {
     private volatile boolean enteringRoom = false;
 
     private String selectedBadge;
+    
+    private static final String SERVER_IP = "192.168.0.8";
+	private static final int SERVER_PORT = 5001;
 
     // ★ 추가: 입장 시 선택된 방 이름
     private String enteringRoomName;
@@ -52,7 +55,8 @@ public class Lobby extends JFrame {
     // ================= 서버 연결 =================
     private void connectServer() {
         try {
-            socket = new Socket("127.0.0.1", 5001);
+        	
+            socket = new Socket(SERVER_IP, SERVER_PORT);
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
