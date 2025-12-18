@@ -9,6 +9,7 @@ public class Home extends JFrame {
     private JButton b_enter, b_setting, b_rule;
     private JTextField t_nickname;
     private JLabel l_nickname;
+    
     private String selectedBadge = null; 
 
     public Home() {

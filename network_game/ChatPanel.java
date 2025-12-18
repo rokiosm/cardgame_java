@@ -18,8 +18,10 @@ public class ChatPanel extends JPanel {
     private JRadioButton teamBtn;
     private DefaultListModel<String> userModel;
     private JList<String> userList;
+    
+    private final Map<String, String> userTeams = new HashMap<>();
 
-    // 🔹 닉네임 → 배지 파일명
+    // 닉네임 → 배지 파일명
     private final Map<String, String> userBadges = new HashMap<>();
     private final BiConsumer<String, String> sendHandler;
 
@@ -27,6 +29,30 @@ public class ChatPanel extends JPanel {
         this.sendHandler = sendHandler;
         buildUI();
     }
+    
+    private ImageIcon loadBadgeIcon(String badgeFile) {
+        try {
+            Image img = new ImageIcon(
+                getClass().getResource("/badge/" + badgeFile)
+            ).getImage().getScaledInstance(14, 14, Image.SCALE_SMOOTH);
+            return new ImageIcon(img);
+        } catch (Exception e) {
+            System.out.println("[BADGE LOAD FAIL] " + badgeFile);
+            return null;
+        }
+    }
+    
+    public void handlePlayerMessage(String msg) {
+        // PLAYER name team badge
+        String[] p = msg.split(" ", 4);
+        if (p.length < 3) return;
+
+        String name = p[1];
+        String team = p[2];
+
+        userTeams.put(name, team);
+    }
+
 
     private void buildUI() {
         setLayout(new BorderLayout());
@@ -76,6 +102,51 @@ public class ChatPanel extends JPanel {
         sendBtn.addActionListener(sendAction);
         inputField.addActionListener(sendAction);
     }
+    public void handleEnter(String nickname, String team, String badge) {
+
+        // ===== 1. 유저 리스트 등록 =====
+        if (!userModel.contains(nickname)) {
+            userModel.addElement(nickname);
+        }
+
+        // ===== 2. 팀 정보 저장 =====
+        userTeams.put(nickname, team);
+
+        // ===== 3. 배지 정보 저장 (NONE / null 방어) =====
+        if (badge == null || "NONE".equals(badge) || badge.isEmpty()) {
+            userBadges.remove(nickname);
+        } else {
+            userBadges.put(nickname, badge);
+        }
+
+        // ===== 4. 입장 메시지 출력 =====
+        SwingUtilities.invokeLater(() -> {
+            try {
+                chatPane.setCaretPosition(doc.getLength());
+
+                // 배지 출력
+                if (badge != null && !"NONE".equals(badge)) {
+                    ImageIcon icon = loadBadgeIcon(badge);
+                    if (icon != null) {
+                        chatPane.insertIcon(icon);
+                        doc.insertString(doc.getLength(), " ", null);
+                    }
+                }
+
+                // [닉네임][팀] 입장했습니다.
+                doc.insertString(
+                        doc.getLength(),
+                        "[" + nickname + "][" + team + "] 입장했습니다.\n",
+                        null
+                );
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+
 
     private void sendChat() {
         String text = inputField.getText().trim();
@@ -90,49 +161,73 @@ public class ChatPanel extends JPanel {
             try {
                 chatPane.setCaretPosition(doc.getLength());
 
-                // MSG [닉네임][팀] 메시지
-                if (raw.startsWith("MSG ")) {
-                    String body = raw.substring(4); // "MSG " 제거
-                    if (body.startsWith("[")) {
-                        int nickEnd = body.indexOf("]");
-                        int teamStart = body.indexOf("[", nickEnd);
-                        int teamEnd = body.indexOf("]", teamStart);
-                        if (nickEnd > 0 && teamStart > 0 && teamEnd > teamStart) {
-                            String nickname = body.substring(1, nickEnd);
-                            String team = body.substring(teamStart + 1, teamEnd);
-                            String text = body.substring(teamEnd + 1).trim();
-
-                            String badgeFile = userBadges.get(nickname);
-                            System.out.println("[BADGE] " + nickname + " → " + badgeFile);
-                            if (badgeFile != null && !"null".equals(badgeFile)) {
-                                ImageIcon icon = new ImageIcon("images/" + badgeFile);
-                                Image scaled = icon.getImage()
-                                        .getScaledInstance(14, 14, Image.SCALE_SMOOTH);
-                                chatPane.insertIcon(new ImageIcon(scaled));
-                                doc.insertString(doc.getLength(), " ", null);
-                            }
-
-                            doc.insertString(
-                                    doc.getLength(),
-                                    "[" + nickname + "][" + team + "] " + text + "\n",
-                                    null
-                            );
-                            return;
-                        }
-                    }
+                // ===== SYSTEM 메시지 (배지 없음) =====
+                if (raw.startsWith("SYSTEM ")) {
+                    doc.insertString(
+                        doc.getLength(),
+                        "[" + raw.substring(7) + "]\n",
+                        null
+                    );
+                    return;
+                }
+                
+                if (raw.startsWith("MSG [SYSTEM]")) {
+                    doc.insertString(
+                        doc.getLength(),
+                        raw.substring(4) + "\n",
+                        null
+                    );
+                    return;
                 }
 
-                // 시스템 메시지
+
+             if (raw.startsWith("CHAT ")) {
+                 String[] parts = raw.split(" ", 6);
+                 if (parts.length < 6) return;
+
+                 String channel = parts[1];    // ALL / TEAM
+                 String nickname = parts[2];
+                 String team = parts[3];
+                 String badgeFile = parts[4];
+                 String text = parts[5];
+
+                 // ===== 배지 =====
+                 if (badgeFile != null && !"NONE".equals(badgeFile)) {
+                     ImageIcon icon = loadBadgeIcon(badgeFile);
+                     if (icon != null) {
+                         chatPane.insertIcon(icon);
+                         doc.insertString(doc.getLength(), " ", null);
+                     }
+                 }
+
+                 // ===== [닉네임][팀] =====
+                 doc.insertString(
+                     doc.getLength(),
+                     "[" + nickname + "][" + team + "] ",
+                     null
+                 );
+
+                 // ===== 메시지 =====
+                 doc.insertString(
+                     doc.getLength(),
+                     text + "\n",
+                     null
+                 );
+                 return;
+             }
+
+
+                // ===== 기타 메시지 =====
                 doc.insertString(doc.getLength(), raw + "\n", null);
+
             } catch (Exception e) {
                 e.printStackTrace();
             }
         });
     }
 
-    // ==========================
-    // 🔹 유저 / 배지 등록
-    // ==========================
+
+    // 유저 / 배지 등록
     public void addUser(String nickname, String badgeFile) {
         System.out.println("[ADD USER] " + nickname + " badge=" + badgeFile);
         SwingUtilities.invokeLater(() -> {

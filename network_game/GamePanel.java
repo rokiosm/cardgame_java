@@ -1,6 +1,8 @@
 package network_game;
 
 import javax.swing.*;
+import javax.swing.Timer;
+
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -26,10 +28,24 @@ public class GamePanel extends JPanel {
     private String teammateName;
     private String enemyLeftName;
     private String enemyRightName;
+    
+    private long gameStartTime;
+    private Timer repaintTimer;
+    private static final int GAME_TIME = 30; // seconds
+
+ // 선택된 카드 문자열
+    private String selectedCard = null;
+
+    // L/R 선택 대기 중 여부
+    private boolean choosingSide = false;
+
 
     // ===== 카드 상태 =====
     private final List<String> myHand = new ArrayList<>();
-    private final Deque<String> center = new ArrayDeque<>();
+
+    // CENTER 좌 / 우
+    private String centerLeft;
+    private String centerRight;
 
     // 카드 개수
     private int teammateCount = 0;
@@ -44,7 +60,7 @@ public class GamePanel extends JPanel {
     private static final int CARD_OVERLAP = 30;
 
     // 선택된 카드
-    private int selectedIndex = -1; 
+    private int selectedIndex = -1;
 
     public GamePanel(String myName, Consumer<String> sender) {
         this.myName = myName;
@@ -61,27 +77,23 @@ public class GamePanel extends JPanel {
             }
         });
     }
-    
-    
 
     // ===== 이미지 로딩 =====
     private void loadImages() {
         backImage = loadImage("cardPng/card_back.png");
     }
 
-    //  핵심 수정 부분
     private Image loadCardImage(String card) {
         return cardImages.computeIfAbsent(card, c ->
                 loadImage("cardPng/" + c + ".png")
         );
     }
 
-
     private Image loadImage(String path) {
         try {
             return new ImageIcon(
                     Objects.requireNonNull(
-                            getClass().getClassLoader().getResource(path) //안 배운부분 
+                            getClass().getClassLoader().getResource(path)
                     )
             ).getImage();
         } catch (Exception e) {
@@ -89,8 +101,6 @@ public class GamePanel extends JPanel {
             return null;
         }
     }
-    
-    
 
     // ===== 서버 메시지 =====
     public void handlePlayer(String msg) {
@@ -111,26 +121,47 @@ public class GamePanel extends JPanel {
         else
             enemyRightName = name;
     }
+    private void drawTimer(Graphics g) {
+        if (!gameStarted) return;
+
+        long elapsed = (System.currentTimeMillis() - gameStartTime) / 1000;
+        long remain = Math.max(0, GAME_TIME - elapsed);
+
+        g.setColor(Color.WHITE);
+        g.setFont(new Font("Arial", Font.BOLD, 20));
+        g.drawString("TIME : " + remain, getWidth() / 2 - 40, 25);
+    }
 
     public void startGame() {
+        if (gameStarted) return;   // ⭐ 중복 방지 핵심
+
         gameStarted = true;
-        repaint();
+        gameStartTime = System.currentTimeMillis();
+
+        repaintTimer = new Timer(100, e -> repaint());
+        repaintTimer.start();
     }
+
+
 
     public void setHand(String data) {
         myHand.clear();
-        selectedIndex = -1;
+        resetSelection();
 
         if (!data.isEmpty())
             myHand.addAll(Arrays.asList(data.split(",")));
 
         repaint();
     }
+    
 
-    public void setCenter(String data) {
-        center.clear();
-        if (!data.equals("NONE") && !data.isEmpty())
-            center.push(data);
+    // CENTER 메시지 처리
+    public void setCenter(String side, String card) {
+        if ("L".equals(side))
+            centerLeft = "NONE".equals(card) ? null : card;
+        else
+            centerRight = "NONE".equals(card) ? null : card;
+
         repaint();
     }
 
@@ -143,9 +174,47 @@ public class GamePanel extends JPanel {
         sideRightCount = Integer.parseInt(p[4]);
         repaint();
     }
+    
+    private void resetSelection() {
+        selectedIndex = -1;
+        selectedCard = null;
+        choosingSide = false;
+        repaint();
+    }
+
 
     // ===== 카드 클릭 =====
     private void handleClick(int x, int y) {
+    	// ===== L / R 선택 단계 =====
+    	if (choosingSide && selectedCard != null) {
+    	    int yCenter = getHeight() / 2 - CARD_H / 2;
+
+    	    Rectangle left = new Rectangle(
+    	        getWidth() / 2 - CARD_W - 20,
+    	        yCenter,
+    	        CARD_W,
+    	        CARD_H
+    	    );
+    	    Rectangle right = new Rectangle(
+    	        getWidth() / 2 + 20,
+    	        yCenter,
+    	        CARD_W,
+    	        CARD_H
+    	    );
+
+    	    if (left.contains(x, y)) {
+    	        sender.accept("PLAY " + selectedCard + " L");
+    	        resetSelection();
+    	        return;
+    	    }
+
+    	    if (right.contains(x, y)) {
+    	        sender.accept("PLAY " + selectedCard + " R");
+    	        resetSelection();
+    	        return;
+    	    }
+    	}
+
         int startX = getWidth() / 2 - (myHand.size() * CARD_OVERLAP) / 2;
         int yPos = getHeight() - CARD_H - 30;
 
@@ -158,14 +227,14 @@ public class GamePanel extends JPanel {
             );
 
             if (r.contains(x, y)) {
-                if (selectedIndex == i) {
-                    sender.accept("PLAY " + myHand.get(i));
-                    selectedIndex = -1;
-                } else {
-                    selectedIndex = i;
-                }
-                repaint();
-                return;
+            	if (selectedIndex == i) {
+            	    selectedCard = myHand.get(i);
+            	    choosingSide = true;   // 이제 L/R 고르기 단계
+            	} else {
+            	    selectedIndex = i;
+            	}
+            	repaint();
+            	return;
             }
         }
     }
@@ -179,6 +248,7 @@ public class GamePanel extends JPanel {
         drawSideDecks(g);
         drawTeammate(g);
         drawMyHand(g);
+        drawTimer(g);
     }
 
     private void drawEnemies(Graphics g) {
@@ -186,12 +256,41 @@ public class GamePanel extends JPanel {
         drawBackStack(g, getWidth() * 3 / 4 - CARD_W / 2, 30, enemyRightCount);
     }
 
+    // CENTER 좌 / 우 분리
     private void drawCenter(Graphics g) {
-        int x = getWidth() / 2 - CARD_W / 2;
         int y = getHeight() / 2 - CARD_H / 2;
-        for (String c : center)
-            drawCard(g, c, x, y, false);
+
+        int leftX = getWidth() / 2 - CARD_W - 20;
+        int rightX = getWidth() / 2 + 20;
+
+        if (centerLeft != null)
+            drawCard(g, centerLeft, leftX, y, false);
+
+        if (centerRight != null)
+            drawCard(g, centerRight, rightX, y, false);
+
+        g.setColor(Color.WHITE);
+        g.drawString("L", leftX + CARD_W / 2 - 4, y - 5);
+        g.drawString("R", rightX + CARD_W / 2 - 4, y - 5);
+        
+        if (choosingSide) {
+            g.setColor(Color.YELLOW);
+            g.drawString(
+                "놓을 위치 선택 (L / R)",
+                getWidth() / 2 - 70,
+                getHeight() / 2 - CARD_H / 2 - 15
+            );
+        }
+
     }
+    
+    public void stopGame() {
+        if (repaintTimer != null) {
+            repaintTimer.stop();
+            repaintTimer = null;
+        }
+    }
+
 
     private void drawSideDecks(Graphics g) {
         int y = getHeight() / 2 - CARD_H / 2;
@@ -222,14 +321,8 @@ public class GamePanel extends JPanel {
     private void drawCard(Graphics g, String card, int x, int y, boolean selected) {
         Image img = loadCardImage(card);
 
-        if (img != null) {
+        if (img != null)
             g.drawImage(img, x, y, CARD_W, CARD_H, this);
-        } else {
-            g.setColor(Color.WHITE);
-            g.fillRoundRect(x, y, CARD_W, CARD_H, 12, 12);
-            g.setColor(Color.BLACK);
-            g.drawString(card, x + 10, y + 25);
-        }
 
         if (selected) {
             Graphics2D g2 = (Graphics2D) g;
@@ -242,9 +335,8 @@ public class GamePanel extends JPanel {
     private void drawBackStack(Graphics g, int x, int y, int count) {
         if (count <= 0 || backImage == null) return;
 
-        for (int i = 0; i < Math.min(5, count); i++) {
+        for (int i = 0; i < Math.min(5, count); i++)
             g.drawImage(backImage, x + i * 5, y + i * 5, CARD_W, CARD_H, this);
-        }
 
         g.setColor(Color.WHITE);
         g.drawString(String.valueOf(count), x + CARD_W / 2 - 4, y + CARD_H / 2);

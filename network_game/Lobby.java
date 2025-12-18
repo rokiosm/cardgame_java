@@ -23,7 +23,9 @@ public class Lobby extends JFrame {
 
     private String selectedBadge;
     
-    private static final String SERVER_IP = "192.168.0.8";
+    
+    /*서버 IP : 192.168.0.8(내꺼) */
+    private static final String SERVER_IP = "223.194.153.40";
 	private static final int SERVER_PORT = 5001;
 
     // ★ 추가: 입장 시 선택된 방 이름
@@ -65,7 +67,7 @@ public class Lobby extends JFrame {
                 throw new IOException("Invalid handshake: " + req);
             }
 
-            out.println(userName);
+            out.println(userName + "|" + selectedBadge);
             connected = true;
 
         } catch (IOException e) {
@@ -190,6 +192,20 @@ public class Lobby extends JFrame {
                 // ===== ★ 핵심 수정 =====
                 else if (msg.startsWith("MSG [SYSTEM]") && msg.contains("입장")) {
                     String roomName = enteringRoomName;
+
+                    SwingUtilities.invokeLater(() -> {
+                        dispose();
+                        try {
+                            new Room(roomName, userName, socket);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                    return;
+                }
+                
+                else if (msg.startsWith("ENTER_OK ")) {
+                    String roomName = msg.substring(9);
 
                     SwingUtilities.invokeLater(() -> {
                         dispose();

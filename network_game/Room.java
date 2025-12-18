@@ -88,26 +88,51 @@ public class Room extends JFrame {
     // 메시지 처리
     private void handleMessage(String line) {
 
-        if (line.startsWith("MSG ")) {
-            chatPanel.addChatMessage(line.substring(4));
+        // ===== 채팅 =====
+        if (line.startsWith("CHAT ")) {
+            chatPanel.addChatMessage(line);
         }
+
+        // ===== 입장 =====
+        else if (line.startsWith("ENTER ")) {
+            // ENTER nick team badge|NONE
+            String[] p = line.split(" ", 4);
+
+            String name = p[1];
+            String team = p[2];
+            String badge = (p.length == 4) ? p[3] : "NONE";
+
+            chatPanel.handleEnter(name, team, badge);
+        }
+
+        // ===== 플레이어 정보 =====
         else if (line.startsWith("PLAYER ")) {
-            gamePanel.handlePlayer(line);
+            chatPanel.handlePlayerMessage(line);
         }
+
+        // ===== 게임 =====
         else if (line.equals("GAME_START")) {
-            chatPanel.addChatMessage("[SYSTEM] 게임 시작!");
             gamePanel.startGame();
         }
+
         else if (line.startsWith("HAND ")) {
-            gamePanel.setHand(line.substring(5));
+            String[] p = line.split(" ", 3);
+            if (p[1].equals(myName)) {
+                gamePanel.setHand(p.length == 3 ? p[2] : "");
+            }
         }
+
         else if (line.startsWith("CENTER ")) {
-            gamePanel.setCenter(line.substring(7));
+            String[] p = line.split(" ", 3);
+            if (p.length == 3) {
+                gamePanel.setCenter(p[1], p[2]);
+            }
         }
+
         else if (line.startsWith("COUNTS ")) {
             gamePanel.setCountsFromMessage(line.substring(7));
         }
-        
+
         else if (line.startsWith("GAME_OVER ")) {
             JOptionPane.showMessageDialog(
                     this,
@@ -116,10 +141,12 @@ public class Room extends JFrame {
                     JOptionPane.INFORMATION_MESSAGE
             );
         }
+
         else {
             System.out.println("ROOM MSG: " + line);
         }
     }
+
 
     // 종료 처리
     private void cleanup() {

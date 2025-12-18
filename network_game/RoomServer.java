@@ -76,6 +76,7 @@ public class RoomServer {
         private BufferedReader in;
 
         private String name;
+        private String badge;
         private String joinedRoom;
         private String team;
 
@@ -96,10 +97,15 @@ public class RoomServer {
                 out.println("ENTER_NAME");
 
                 while (true) {
-                    name = in.readLine();
-                    if (name == null) return;
+                    String raw = in.readLine();
+                    if (raw == null) return;
 
-                    name = name.trim();
+                    // raw = "닉네임|badge.png"
+                    String[] parts = raw.split("\\|");
+
+                    name = parts[0].trim();
+                    badge = (parts.length > 1) ? parts[1] : null;
+
                     if (name.isEmpty()) {
                         out.println("NAME_INVALID");
                         continue;
@@ -108,7 +114,7 @@ public class RoomServer {
                     synchronized (usedNames) {
                         if (!usedNames.contains(name)) {
                             usedNames.add(name);
-                            break; 
+                            break;
                         }
                     }
 
@@ -191,7 +197,8 @@ public class RoomServer {
                 r.users.add(this);
             }
 
-            broadcast(r, "MSG [SYSTEM] " + name + " 입장 (" + team + ")");
+            out.println("ENTER_OK " + roomName);
+            broadcast(r, "ENTER " + name + " " + team + " " + (badge == null ? "NONE" : badge));
 
             if (r.users.size() == 4)
                 startGame(r);
@@ -203,48 +210,82 @@ public class RoomServer {
                 if (r.gameStarted) return;
                 r.gameStarted = true;
 
-                List<String> players = new ArrayList<>();
-                for (ClientHandler u : r.users)
-                    players.add(u.name);
-
-                r.game = new GameState(players);
-
+                List<String> names = new ArrayList<>();
                 for (ClientHandler u : r.users) {
-                    for (ClientHandler v : r.users) {
-                        u.out.println("PLAYER " + v.name + " " + v.team);
-                    }
+                    names.add(u.name);
                 }
+                r.game = new GameState(names);
 
                 broadcast(r, "GAME_START");
+                broadcast(r, "CENTER L " + r.game.getCenterLeft());
+                broadcast(r, "CENTER R " + r.game.getCenterRight());
 
                 for (ClientHandler u : r.users) {
-                    u.out.println("HAND " + r.game.getHandString(u.name));
-                    u.out.println(makeCountsMessageFor(u));
+                    u.out.println("HAND " + u.name + " " + r.game.getHandString(u.name));
                 }
 
-                broadcastCenter(r);
+                for (ClientHandler u : r.users) {
+                    u.out.println(makeCountsMessageFor(u));
+                }
             }
+
+            new Thread(() -> {
+                try {
+                    Thread.sleep(30_000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+
+                synchronized (r.gameLock) {
+                    if (r.game.isFinished()) return;
+
+                    String result = r.game.judgeByTimeOver();
+                    broadcast(r,
+                        result.equals("DRAW")
+                            ? "GAME_OVER DRAW"
+                            : "GAME_OVER TEAM_" + result
+                    );
+                }
+            }).start();
         }
 
 
-        private void handlePlay(String cardStr) {
+
+
+
+        private void handlePlay(String msg) {
+            // msg = "11C L"
+            String[] parts = msg.split(" ");
+            if (parts.length != 2) return;
+
+            Card card;
+            try {
+                card = Card.fromString(parts[0]);
+            } catch (Exception e) {
+                return;
+            }
+
+            String side = parts[1]; // "L" or "R"
+            if (!side.equals("L") && !side.equals("R")) return;
+
             RoomInfo r = rooms.get(joinedRoom);
             if (r == null) return;
 
             synchronized (r.gameLock) {
-                boolean ok = r.game.playCard(name, Card.fromString(cardStr));
+                boolean ok = r.game.playCard(name, card, side);
                 if (!ok) return;
 
-                broadcast(r, "PLAY_OK " + name + " " + cardStr);
-                broadcastCenter(r);
+                broadcast(r, "CENTER " + side + " " + card);
+                broadcast(r, "HAND " + name + " " + r.game.getHandString(name));
 
                 for (ClientHandler u : r.users)
                     u.out.println(makeCountsMessageFor(u));
 
                 if (r.game.isFinished())
-                	broadcast(r, "GAME_OVER " + r.game.getWinnerTeam());
+                    broadcast(r, "GAME_OVER " + r.game.getWinnerTeam());
             }
         }
+
         
         
 
@@ -295,11 +336,17 @@ public class RoomServer {
                     muteUntil = now + MUTE_TIME;
             }
 
-            String outMsg = "MSG [" + name + "] " + msg;
-            if (teamOnly)
-                broadcastTeam(r, team, outMsg);
-            else
+            String outMsg;
+            if (teamOnly) {
+            	outMsg = "CHAT TEAM " + name + " " + team + " " +
+            	         (badge == null ? "NONE" : badge) + " " + msg;
+            	broadcastTeam(r, team, outMsg);
+
+            } else {
+            	outMsg = "CHAT ALL " + name + " " + team + " " +
+            	         (badge == null ? "NONE" : badge) + " " + msg;
                 broadcast(r, outMsg);
+            }
         }
 
         private boolean containsBadWord(String msg) {
@@ -331,8 +378,12 @@ public class RoomServer {
         }
 
         private void broadcastCenter(RoomInfo r) {
-            Card c = r.game.getCenterTop();
-            broadcast(r, "CENTER " + (c == null ? "NONE" : c));
+        	Card cl = r.game.getCenterLeft();
+        	Card cr = r.game.getCenterRight();
+
+        	broadcast(r, "CENTER L " + (cl == null ? "NONE" : cl));
+        	broadcast(r, "CENTER R " + (cr == null ? "NONE" : cr));
+            
         }
 
         private void cleanup() {
@@ -342,6 +393,7 @@ public class RoomServer {
                 }
             	socket.close(); 
             	} catch (Exception ignored) {}
+      
             allHandlers.remove(this);
             usedNames.remove(name);
             if (joinedRoom != null) {
